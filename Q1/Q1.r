@@ -26,7 +26,7 @@ weather  <- read.csv("../data/atmospheric_cond.csv")
 # -----------------------------
 accident_sel <- accident %>%
   dplyr::select(ACCIDENT_NO, ROAD_GEOMETRY, SEVERITY, SPEED_ZONE,
-                LIGHT_CONDITION, NO_OF_VEHICLES)
+                LIGHT_CONDITION)
 
 location_sel <- location %>%
   dplyr::select(ACCIDENT_NO, ROAD_TYPE)

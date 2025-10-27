@@ -20,17 +20,6 @@ print(head(accident))
 accident_sel <- accident %>%
   dplyr::select(ACCIDENT_NO, ACCIDENT_TIME, LIGHT_CONDITION, SEVERITY)
 
-# Missingness bar plot
-missing_df <- accident_sel %>%
-  summarise_all(~sum(is.na(.))) %>%
-  pivot_longer(everything(), names_to = "variable", values_to = "missing")
-
-ggplot(missing_df, aes(x = variable, y = missing, fill = variable)) +
-  geom_col() +
-  labs(title = "Missing values in selected columns", y = "Count missing") +
-  theme_minimal() +
-  theme(legend.position = "none")
-
 # 3. Parse time and create TIME_OF_DAY ----------------------------------------
 accident_sel <- accident_sel %>%
   mutate(
@@ -119,12 +108,24 @@ ggplot(accident_sel, aes(x = LIGHT_CAT, fill = SEVERITY_CAT)) +
   scale_fill_brewer(palette = "Reds")
 
 # Faceted proportion of severe vs non-severe by TIME_OF_DAY and LIGHT_CAT
-ggplot(accident_sel, aes(x = factor(SEVERE_BIN), fill = factor(SEVERE_BIN))) +
-  geom_bar(position = "fill", na.rm = TRUE) +
+# Compute proportions by TIME_OF_DAY × LIGHT_CAT
+plot_df <- accident_sel %>%
+  group_by(TIME_OF_DAY, LIGHT_CAT, SEVERE_BIN) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(TIME_OF_DAY, LIGHT_CAT) %>%
+  mutate(prop = n / sum(n))
+
+# Plot with proportions and labels
+ggplot(plot_df, aes(x = factor(SEVERE_BIN), y = prop, fill = factor(SEVERE_BIN))) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(prop, accuracy = 0.1)),
+            position = position_stack(vjust = 0.5), color = "white", size = 3) +
   facet_grid(LIGHT_CAT ~ TIME_OF_DAY) +
   scale_x_discrete(labels = c("0" = "Non Severe", "1" = "Severe")) +
+  scale_y_continuous(labels = scales::percent) +
   labs(y = "Proportion", title = "Proportion Severe by Lighting and Time of Day") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
 
 # 8. Chi-square tests and tile (mosaic-like) plots ------------------------------
 time_tab <- table(accident_sel$TIME_OF_DAY, accident_sel$SEVERITY_CAT)
@@ -236,6 +237,3 @@ ci_low  <- exp(coef(logit_model) - 1.96 * est[, "Std. Error"])
 ci_high <- exp(coef(logit_model) + 1.96 * est[, "Std. Error"])
 or_table <- data.frame(OR = or, CI_low = ci_low, CI_high = ci_high)
 print(or_table)
-
-# End -------------------------------------------------------------------------
-message("Script complete. Review plots and model outputs to interpret how light condition and time of day affect crash severity.")
