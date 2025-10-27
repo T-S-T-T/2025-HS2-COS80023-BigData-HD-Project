@@ -181,33 +181,3 @@ multi_eff <- Effect("ROAD_GEOMETRY", multi_model)
 plot(multi_eff,
      main = "Predicted probability of crash severity by road geometry",
      xlab = "Road geometry", ylab = "Predicted probability")
-
-# -----------------------------
-# 9. Optional: Predicted probabilities from logistic model (by geometry)
-# -----------------------------
-# Create a reference grid holding other covariates at typical values
-ref_row <- crash_data %>%
-  summarise(
-    SPEED_ZONE = median(SPEED_ZONE, na.rm = TRUE),
-    LIGHT_CONDITION = levels(LIGHT_CONDITION)[1],
-    SURFACE_COND = levels(SURFACE_COND)[1],
-    ATMOSPH_COND = levels(factor(ATMOSPH_COND))[1],
-    ROAD_TYPE = levels(factor(ROAD_TYPE))[1]
-  )
-
-newdat <- crash_data %>%
-  distinct(ROAD_GEOMETRY) %>%
-  mutate(SPEED_ZONE = ref_row$SPEED_ZONE,
-         LIGHT_CONDITION = ref_row$LIGHT_CONDITION,
-         SURFACE_COND = ref_row$SURFACE_COND,
-         ATMOSPH_COND = ref_row$ATMOSPH_COND,
-         ROAD_TYPE = ref_row$ROAD_TYPE)
-
-newdat$pred <- predict(logit_model, newdata = newdat, type = "response")
-
-p_pred <- ggplot(newdat, aes(x = ROAD_GEOMETRY, y = pred)) +
-  geom_col(fill = "#377eb8") +
-  labs(title = "Adjusted probability of severe crash by road geometry",
-       x = "Road geometry", y = "Predicted probability (severe)") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-print(p_pred)
