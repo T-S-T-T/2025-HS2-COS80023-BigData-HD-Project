@@ -6,79 +6,57 @@
 # Load libraries
 library(dplyr)
 library(ggplot2)
-library(nnet)      # multinomial regression
-library(broom)     # tidy model outputs
-library(effects)   # model effects / predicted probabilities
-library(reshape2)  # melt contingency tables for heatmaps
-library(forcats)   # factor manipulation
-library(cowplot)   # combine plots
+library(nnet)
+library(forcats)
+library(cowplot)
+library(effects)
 
 # -----------------------------
-# 1. Import relevant tables
+# 1. Import only required data
 # -----------------------------
 accident <- read.csv("../data/accident.csv")
-location <- read.csv("../data/accident_Location.csv")
-surface  <- read.csv("../data/road_surface_cond.csv")
-weather  <- read.csv("../data/atmospheric_cond.csv")
 
 # -----------------------------
-# 2. Select only relevant columns
+# 2. Select relevant columns
 # -----------------------------
-accident_sel <- accident %>%
-  dplyr::select(ACCIDENT_NO, ROAD_GEOMETRY, SEVERITY, SPEED_ZONE,
-                LIGHT_CONDITION)
-
-location_sel <- location %>%
-  dplyr::select(ACCIDENT_NO, ROAD_TYPE)
-
-surface_sel <- surface %>%
-  dplyr::select(ACCIDENT_NO, SURFACE_COND)
-
-# Collapse multiple weather conditions into one row per accident
-weather_collapsed <- weather %>%
-  group_by(ACCIDENT_NO) %>%
-  summarise(ATMOSPH_COND = paste(unique(ATMOSPH_COND), collapse = ", "))
+crash_data <- accident %>%
+  dplyr::select(ACCIDENT_NO, ROAD_GEOMETRY, SEVERITY)
 
 # -----------------------------
-# 3. Join all tables
+# 3. Clean, recode, and keep only three geometries
 # -----------------------------
-crash_data <- accident_sel %>%
-  left_join(location_sel, by = "ACCIDENT_NO") %>%
-  left_join(surface_sel, by = "ACCIDENT_NO") %>%
-  left_join(weather_collapsed, by = "ACCIDENT_NO")
-
-# -----------------------------
-# 4. Clean and recode variables
-# -----------------------------
-# Convert ROAD_GEOMETRY to factor with labels
 crash_data <- crash_data %>%
   mutate(ROAD_GEOMETRY = factor(ROAD_GEOMETRY,
                                 levels = 1:9,
                                 labels = c("Cross intersection", "T intersection", "Y intersection",
                                            "Multiple intersections", "Not at intersection",
-                                           "Dead end", "Road closure", "Private property", "Unknown")))
-
-# Remove missing geometry or severity
-crash_data <- crash_data %>%
-  filter(!is.na(ROAD_GEOMETRY), !is.na(SEVERITY))
+                                           "Dead end", "Road closure", "Private property", "Unknown"))) %>%
+  filter(!is.na(ROAD_GEOMETRY), !is.na(SEVERITY)) %>%
+  filter(ROAD_GEOMETRY %in% c("Not at intersection", "Cross intersection", "T intersection")) %>%
+  droplevels()
 
 # Create ordered severity categories
 crash_data <- crash_data %>%
   mutate(SEVERITY_CAT = factor(SEVERITY,
                                levels = c(1, 2, 3, 4),
                                labels = c("Fatal", "Serious Injury", "Other Injury", "Non Injury"),
-                               ordered = TRUE))
+                               ordered = TRUE)) %>%
+  mutate(SEVERITY_CAT = droplevels(SEVERITY_CAT))
+
+# >>> Print counts of crashes by geometry and severity <<<
+cat("\nCrash counts by road geometry and severity:\n")
+print(table(crash_data$ROAD_GEOMETRY, crash_data$SEVERITY_CAT))
 
 # Create binary severe vs non-severe variable
 crash_data <- crash_data %>%
   mutate(SEVERE_BIN = ifelse(SEVERITY %in% c(1, 2), 1, 0))
 
-# Optional: Set a meaningful reference for geometry (commonly "Not at intersection")
+# Set reference for geometry
 crash_data <- crash_data %>%
   mutate(ROAD_GEOMETRY = fct_relevel(ROAD_GEOMETRY, "Not at intersection"))
 
 # -----------------------------
-# 5. Exploratory Visualizations
+# 4. Exploratory visualizations
 # -----------------------------
 p_counts <- ggplot(crash_data, aes(x = ROAD_GEOMETRY, fill = SEVERITY_CAT)) +
   geom_bar() +
@@ -92,43 +70,28 @@ p_props <- ggplot(crash_data, aes(x = ROAD_GEOMETRY, fill = SEVERITY_CAT)) +
        title = "Crash severity proportions by road geometry") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# Show side-by-side
 plot_grid(p_counts, p_props, ncol = 2)
 
 # -----------------------------
-# 6. Chi-square test + heatmap
+# 5. Chi-square test
 # -----------------------------
 geom_sev_tab <- table(crash_data$ROAD_GEOMETRY, crash_data$SEVERITY_CAT)
 chi_out <- chisq.test(geom_sev_tab)
 print(chi_out)
 
-# Heatmap of contingency table
-geom_sev_df <- as.data.frame(geom_sev_tab)
-colnames(geom_sev_df) <- c("ROAD_GEOMETRY", "SEVERITY_CAT", "Freq")
-
-p_heat <- ggplot(geom_sev_df, aes(x = SEVERITY_CAT, y = ROAD_GEOMETRY, fill = Freq)) +
-  geom_tile(color = "white") +
-  scale_fill_gradient(low = "white", high = "red") +
-  labs(title = "Crash severity by road geometry (counts)",
-       x = "Severity category", y = "Road geometry", fill = "Count") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-print(p_heat)
+# Note: If the p-value is near 0, it means the difference in severity patterns
+# across road geometries is very unlikely to be due to chance → strong evidence
+# that road geometry and crash severity are related.
 
 # -----------------------------
-# 7. Logistic regression (binary severe vs non-severe) + forest plot
+# 6. Logistic regression (binary severe vs non-severe) + forest plot
 # -----------------------------
-
-# Fit logistic regression
-logit_model <- glm(SEVERE_BIN ~ ROAD_GEOMETRY + SPEED_ZONE + LIGHT_CONDITION +
-                     SURFACE_COND + ATMOSPH_COND + ROAD_TYPE,
+logit_model <- glm(SEVERE_BIN ~ ROAD_GEOMETRY,
                    data = crash_data, family = binomial)
 
 summary(logit_model)
 
-# ---- Compute odds ratios with Wald confidence intervals ----
 coefs <- summary(logit_model)$coefficients
-
 OR <- exp(coefs[,1])
 lower <- exp(coefs[,1] - 1.96 * coefs[,2])
 upper <- exp(coefs[,1] + 1.96 * coefs[,2])
@@ -141,13 +104,11 @@ or_table <- data.frame(
   p.value = coefs[,4]
 )
 
-# ---- Filter to geometry terms only ----
 geom_terms <- or_table %>%
   dplyr::filter(grepl("^ROAD_GEOMETRY", term)) %>%
   dplyr::mutate(term_clean = gsub("^ROAD_GEOMETRY", "", term),
                 term_clean = ifelse(term_clean == "", "(ref)", term_clean))
 
-# ---- Forest plot ----
 p_forest <- ggplot(geom_terms,
                    aes(x = reorder(term_clean, estimate),
                        y = estimate,
@@ -161,23 +122,41 @@ p_forest <- ggplot(geom_terms,
   theme_minimal()
 
 print(p_forest)
-
-# ---- Also print OR table for geometry ----
 print(geom_terms %>% dplyr::select(term_clean, estimate, conf.low, conf.high, p.value))
 
 # -----------------------------
-# 8. Multinomial regression (optional, keep 4 categories) + effects plot
+# 7. Multinomial regression (4 severity categories) + bar chart of predicted probabilities
 # -----------------------------
-multi_model <- multinom(SEVERITY_CAT ~ ROAD_GEOMETRY + SPEED_ZONE + LIGHT_CONDITION +
-                          SURFACE_COND + ATMOSPH_COND + ROAD_TYPE,
+multi_model <- multinom(SEVERITY_CAT ~ ROAD_GEOMETRY,
                         data = crash_data, trace = FALSE)
 
 summary(multi_model)
 
-# Predicted probabilities for severity by geometry
-multi_eff <- Effect("ROAD_GEOMETRY", multi_model)
+# Get predicted probabilities for each observation
+pred_probs <- as.data.frame(predict(multi_model, type = "probs"))
+pred_probs$ROAD_GEOMETRY <- crash_data$ROAD_GEOMETRY
 
-# The 'plot' method draws a multipanel plot of predicted probabilities
-plot(multi_eff,
-     main = "Predicted probability of crash severity by road geometry",
-     xlab = "Road geometry", ylab = "Predicted probability")
+# Average predicted probabilities by geometry
+pred_summary <- pred_probs %>%
+  group_by(ROAD_GEOMETRY) %>%
+  summarise(across(everything(), mean)) %>%
+  tidyr::pivot_longer(-ROAD_GEOMETRY,
+                      names_to = "Severity",
+                      values_to = "Predicted_Prob")
+
+# Convert to percentages
+pred_summary <- pred_summary %>%
+  mutate(Percent = Predicted_Prob * 100)
+
+# Bar chart with percentage labels
+p_pred_bar <- ggplot(pred_summary,
+                     aes(x = ROAD_GEOMETRY, y = Percent, fill = Severity)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sprintf("%.1f%%", Percent)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.3, size = 3) +
+  labs(title = "Predicted probability of crash severity by road geometry",
+       x = "Road geometry", y = "Predicted probability (%)") +
+  theme_minimal()
+
+print(p_pred_bar)
