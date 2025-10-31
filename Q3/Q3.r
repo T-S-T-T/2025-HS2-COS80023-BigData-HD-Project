@@ -1,130 +1,164 @@
-# ============================================================
-# Analysis: Effect of seatbelt/helmet usage on hospitalisation
-# ============================================================
+# -------------------------------------------------
+# Research Question:
+# Does seatbelt/helmet usage affect hospitalisation?
+# -------------------------------------------------
 
-# 1. Load libraries
+# Load libraries
 library(dplyr)
 library(ggplot2)
+library(nnet)
+library(forcats)
+library(cowplot)
+library(effects)
 
-# 2. Import Person table
+# -----------------------------
+# 1. Import only required data
+# -----------------------------
 person <- read.csv("../data/person.csv")
 
-# 3. Select relevant columns
-person_sel <- person %>%
-  select(PERSON_ID, HELMET_BELT_WORN, INJ_LEVEL, TAKEN_HOSPITAL, AGE_GROUP, SEX)
+# -----------------------------
+# 2. Select relevant columns
+# -----------------------------
+person_data <- person %>%
+  dplyr::select(PERSON_ID, HELMET_BELT_WORN, INJ_LEVEL, TAKEN_HOSPITAL)
 
-# 4. Recode protection variable
-person_sel <- person_sel %>%
-  mutate(
-    PROTECTION = case_when(
-      HELMET_BELT_WORN %in% c(1, "1") ~ "Seatbelt worn",
-      HELMET_BELT_WORN %in% c(2, "2") ~ "Seatbelt not worn",
-      HELMET_BELT_WORN %in% c(3, "3") ~ "Child restraint worn",
-      HELMET_BELT_WORN %in% c(4, "4") ~ "Child restraint not worn",
-      HELMET_BELT_WORN %in% c(5, "5") ~ "No restraint fitted",
-      HELMET_BELT_WORN %in% c(6, "6") ~ "Helmet worn",
-      HELMET_BELT_WORN %in% c(7, "7") ~ "Helmet not worn",
-      HELMET_BELT_WORN %in% c(8, "8") ~ "Not appropriate",
-      HELMET_BELT_WORN %in% c(9, "9") ~ "Not known",
-      TRUE                            ~ "Unknown"
-    ),
-    # Define hospitalisation outcome
-    HOSP_BIN = case_when(
-      TAKEN_HOSPITAL == "Y" ~ 1,
-      INJ_LEVEL %in% c(1,2) ~ 1,   # Fatality or serious injury
-      TRUE                  ~ 0
-    )
-  )
+# -----------------------------
+# 3. Clean, recode protection and outcomes
+# -----------------------------
+person_data <- person %>%
+  mutate(PROTECTION = case_when(
+    HELMET_BELT_WORN %in% c(1, "1") ~ "Seatbelt worn",
+    HELMET_BELT_WORN %in% c(2, "2") ~ "Seatbelt not worn",
+    HELMET_BELT_WORN %in% c(3, "3") ~ "Child restraint worn",
+    HELMET_BELT_WORN %in% c(4, "4") ~ "Child restraint not worn",
+    HELMET_BELT_WORN %in% c(5, "5") ~ "No restraint fitted",
+    HELMET_BELT_WORN %in% c(6, "6") ~ "Helmet worn",
+    HELMET_BELT_WORN %in% c(7, "7") ~ "Helmet not worn",
+    HELMET_BELT_WORN %in% c(8, "8") ~ "Not appropriate",
+    HELMET_BELT_WORN %in% c(9, "9") ~ "Not known",
+    TRUE ~ "Unknown"
+  )) %>%
+  filter(PROTECTION != "Unknown") %>%
+  droplevels()
 
-# 5. Convert to factors
-person_sel <- person_sel %>%
-  mutate(
-    PROTECTION = factor(PROTECTION),
-    SEX = factor(SEX),
-    HOSP_BIN = factor(HOSP_BIN, levels = c(0,1), labels = c("No","Yes"))
-  )
+# Create ordered severity categories
+person_data <- person_data %>%
+  mutate(SEVERITY_CAT = factor(INJ_LEVEL,
+                               levels = c(1, 2, 3, 4),
+                               labels = c("Fatal", "Serious Injury", "Other Injury", "Non Injury"),
+                               ordered = TRUE)) %>%
+  mutate(SEVERITY_CAT = droplevels(SEVERITY_CAT))
 
-# ============================================================
-# Exploratory analysis
-# ============================================================
+# >>> Print counts of cases by protection and severity <<<
+cat("\nCounts by protection and severity:\n")
+print(table(person_data$PROTECTION, person_data$SEVERITY_CAT))
 
-# 6. Proportions by protection type
-prop.table(table(person_sel$PROTECTION, person_sel$HOSP_BIN), margin = 1)
+# Create binary hospitalisation variable
+person_data <- person_data %>%
+  mutate(HOSP_BIN = ifelse(TAKEN_HOSPITAL == "Y" | INJ_LEVEL %in% c(1,2), 1, 0))
 
-# 7. Visual: stacked bar chart
-ggplot(person_sel, aes(x = PROTECTION, fill = HOSP_BIN)) +
+# Set reference for protection
+person_data <- person_data %>%
+  mutate(PROTECTION = fct_relevel(PROTECTION, "Seatbelt not worn"))
+
+# -----------------------------
+# 4. Exploratory visualizations
+# -----------------------------
+p_counts <- ggplot(person_data, aes(x = PROTECTION, fill = SEVERITY_CAT)) +
+  geom_bar() +
+  labs(y = "Count", x = "Protection",
+       title = "Crash severity counts by protection type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p_props <- ggplot(person_data, aes(x = PROTECTION, fill = SEVERITY_CAT)) +
   geom_bar(position = "fill") +
-  scale_y_continuous(labels = scales::percent_format()) +
-  scale_fill_manual(values = c("No" = "#4CAF50", "Yes" = "#F44336")) +
-  labs(
-    x = "Protection",
-    y = "Hospitalised proportion",
-    fill = "Hospitalised",
-    title = "Hospitalisation by seatbelt/helmet usage"
-  ) +
-  theme_minimal(base_size = 13) +
-  coord_flip()   # flip for readability if many categories
+  labs(y = "Proportion", x = "Protection",
+       title = "Crash severity proportions by protection type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# ============================================================
-# Chi-square test
-# ============================================================
+plot_grid(p_counts, p_props, ncol = 2)
 
-tab_prot_hosp <- table(person_sel$PROTECTION, person_sel$HOSP_BIN)
-chi_res <- chisq.test(tab_prot_hosp)
-print(chi_res)
+# -----------------------------
+# 5. Chi-square test
+# -----------------------------
+prot_sev_tab <- table(person_data$PROTECTION, person_data$SEVERITY_CAT)
+chi_out <- chisq.test(prot_sev_tab)
+print(chi_out)
 
-# ============================================================
-# Logistic regression
-# ============================================================
-
-# Convert HOSP_BIN back to numeric for glm
-person_sel_glm <- person_sel %>%
-  mutate(HOSP_BIN_NUM = as.integer(HOSP_BIN) - 1)
-
-logit_model <- glm(HOSP_BIN_NUM ~ PROTECTION + AGE_GROUP + SEX,
-                   data = person_sel_glm, family = binomial)
+# -----------------------------
+# 6. Logistic regression (binary hospitalised vs not) + forest plot
+# -----------------------------
+logit_model <- glm(HOSP_BIN ~ PROTECTION,
+                   data = person_data, family = binomial)
 
 summary(logit_model)
 
-# ============================================================
-# Odds ratios and forest plot
-# ============================================================
-
-est <- coef(summary(logit_model))
-coefs <- coef(logit_model)
-
-or       <- exp(coefs)
-ci_low   <- exp(coefs - 1.96 * est[, "Std. Error"])
-ci_high  <- exp(coefs + 1.96 * est[, "Std. Error"])
-term     <- names(or)
+coefs <- summary(logit_model)$coefficients
+OR <- exp(coefs[,1])
+lower <- exp(coefs[,1] - 1.96 * coefs[,2])
+upper <- exp(coefs[,1] + 1.96 * coefs[,2])
 
 or_table <- data.frame(
-  Term   = term,
-  OR     = or,
-  CI_low = ci_low,
-  CI_high= ci_high,
-  row.names = NULL
+  term = rownames(coefs),
+  estimate = OR,
+  conf.low = lower,
+  conf.high = upper,
+  p.value = coefs[,4]
 )
-print(or_table)
 
-# Forest plot
-forest_df <- or_table %>%
-  filter(Term != "(Intercept)") %>%
-  mutate(
-    Term_label = Term,
-    Term_label = gsub("^PROTECTION", "Protection: ", Term_label),
-    Term_label = gsub("^SEX", "Sex: ", Term_label),
-    Term_label = gsub("^AGE_GROUP", "Age group: ", Term_label)
-  )
+prot_terms <- or_table %>%
+  dplyr::filter(grepl("^PROTECTION", term)) %>%
+  dplyr::mutate(term_clean = gsub("^PROTECTION", "", term),
+                term_clean = ifelse(term_clean == "", "(ref)", term_clean))
 
-ggplot(forest_df, aes(y = Term_label, x = OR)) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
-  geom_point(size = 2, color = "#1f77b4") +
-  geom_errorbarh(aes(xmin = CI_low, xmax = CI_high), height = 0.2, color = "#1f77b4") +
-  scale_x_log10() +
-  labs(
-    title = "Adjusted odds ratios for hospitalisation",
-    x = "Odds ratio (log scale)",
-    y = ""
-  ) +
-  theme_minimal(base_size = 13)
+p_forest <- ggplot(prot_terms,
+                   aes(x = reorder(term_clean, estimate),
+                       y = estimate,
+                       ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
+  geom_pointrange(size = 0.4) +
+  coord_flip() +
+  labs(title = "Adjusted odds ratios: hospitalisation by protection type",
+       x = "Protection (reference: Seatbelt not worn)",
+       y = "Odds ratio (with 95% Wald CI)") +
+  theme_minimal()
+
+print(p_forest)
+print(prot_terms %>% dplyr::select(term_clean, estimate, conf.low, conf.high, p.value))
+
+# -----------------------------
+# 7. Multinomial regression (4 severity categories) + bar chart of predicted probabilities
+# -----------------------------
+multi_model <- multinom(SEVERITY_CAT ~ PROTECTION,
+                        data = person_data, trace = FALSE)
+
+summary(multi_model)
+
+# Get predicted probabilities for each observation
+pred_probs <- as.data.frame(predict(multi_model, type = "probs"))
+pred_probs$PROTECTION <- person_data$PROTECTION
+
+# Average predicted probabilities by protection
+pred_summary <- pred_probs %>%
+  group_by(PROTECTION) %>%
+  summarise(across(everything(), mean)) %>%
+  tidyr::pivot_longer(-PROTECTION,
+                      names_to = "Severity",
+                      values_to = "Predicted_Prob")
+
+# Convert to percentages
+pred_summary <- pred_summary %>%
+  mutate(Percent = Predicted_Prob * 100)
+
+# Bar chart with percentage labels
+p_pred_bar <- ggplot(pred_summary,
+                     aes(x = PROTECTION, y = Percent, fill = Severity)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sprintf("%.1f%%", Percent)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.3, size = 3) +
+  labs(title = "Predicted probability of crash severity by protection type",
+       x = "Protection", y = "Predicted probability (%)") +
+  theme_minimal()
+
+print(p_pred_bar)
