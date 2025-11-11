@@ -24,7 +24,7 @@ crash_data <- accident %>%
   dplyr::select(ACCIDENT_NO, LIGHT_CONDITION, SEVERITY)
 
 # -----------------------------
-# 3. Clean and recode variables
+# 3. Clean and re code variables
 # -----------------------------
 crash_data <- crash_data %>%
   mutate(
@@ -44,6 +44,10 @@ crash_data <- crash_data %>%
   filter(!is.na(SEVERITY), !is.na(LIGHT_CAT)) %>%
   mutate(LIGHT_CAT = factor(LIGHT_CAT)) %>%
   droplevels()
+
+# After creating LIGHT_CAT as a factor (and before modeling)
+crash_data <- crash_data %>%
+  mutate(LIGHT_CAT = fct_relevel(LIGHT_CAT, "Daylight"))
 
 # >>> Print counts of crashes by lighting and severity <<<
 cat("\nCrash counts by lighting and severity:\n")
