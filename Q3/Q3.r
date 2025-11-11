@@ -27,15 +27,9 @@ person_data <- person %>%
 # -----------------------------
 person_data <- person %>%
   mutate(PROTECTION = case_when(
-    HELMET_BELT_WORN %in% c(1, "1") ~ "Seatbelt worn",
-    HELMET_BELT_WORN %in% c(2, "2") ~ "Seatbelt not worn",
-    HELMET_BELT_WORN %in% c(3, "3") ~ "Child restraint worn",
-    HELMET_BELT_WORN %in% c(4, "4") ~ "Child restraint not worn",
-    HELMET_BELT_WORN %in% c(5, "5") ~ "No restraint fitted",
-    HELMET_BELT_WORN %in% c(6, "6") ~ "Helmet worn",
-    HELMET_BELT_WORN %in% c(7, "7") ~ "Helmet not worn",
-    HELMET_BELT_WORN %in% c(8, "8") ~ "Not appropriate",
-    HELMET_BELT_WORN %in% c(9, "9") ~ "Not known",
+    HELMET_BELT_WORN %in% c(1, "1", 3, "3", 6, "6") ~ "Protection worn",        # seatbelt worn, child restraint worn, helmet worn
+    HELMET_BELT_WORN %in% c(2, "2", 4, "4", 5, "5", 7, "7") ~ "Protection not worn", # seatbelt not worn, child restraint not worn, no restraint, helmet not worn
+    HELMET_BELT_WORN %in% c(8, "8", 9, "9") ~ "Unknown/Not appropriate",        # not appropriate, not known
     TRUE ~ "Unknown"
   )) %>%
   filter(PROTECTION != "Unknown") %>%
@@ -59,7 +53,7 @@ person_data <- person_data %>%
 
 # Set reference for protection
 person_data <- person_data %>%
-  mutate(PROTECTION = fct_relevel(PROTECTION, "Seatbelt not worn"))
+  mutate(PROTECTION = fct_relevel(PROTECTION, "Protection worn"))
 
 # -----------------------------
 # 4. Exploratory visualizations
@@ -119,7 +113,7 @@ p_forest <- ggplot(prot_terms,
   geom_pointrange(size = 0.4) +
   coord_flip() +
   labs(title = "Adjusted odds ratios: hospitalisation by protection type",
-       x = "Protection (reference: Seatbelt not worn)",
+       x = "Protection (reference: Protection worn)",
        y = "Odds ratio (with 95% Wald CI)") +
   theme_minimal()
 
